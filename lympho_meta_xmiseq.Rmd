@@ -1,0 +1,430 @@
+---
+title: "lympho_meta_xmiseq"
+author: '249'
+date: '2022 4 15 '
+output: github_document
+---
+
+```{r setup, include=FALSE}
+# install.packages("installr")
+# library(maftools)
+# install.R()
+# rm(list = ls())
+#install.packages("xfun")
+setwd("D:\\") # myfunc.R 이 저장된 폴더
+# install.packages('dplyr','doParallel','stringr','data.table','limma','stringi','parallel','psych','ggm','corpcor','ggplot2','purrr','NetworkToolbox','reticulate')
+# install.packages('limma')
+setdir<-"D:\\lymph_meta_xmiseq"
+library(beepr)
+library(readxl)
+library(TCGAbiolinks)
+library(dplyr)
+library(DT)
+library(SummarizedExperiment)
+library(stringr)
+library(doParallel)
+library(data.table)
+library(limma)
+library(stringi)
+library(parallel)
+library(psych)
+library(ggm)
+library(corpcor)
+library(ggplot2)
+library(purrr)
+library(NetworkToolbox)
+library(reticulate)
+library(RMySQL)
+library(reshape2)
+library(spatstat)
+library(gplots)
+library(RColorBrewer)
+library(pROC)
+library(pheatmap)
+library(hpar)
+library(enrichR)
+library(progress)
+library(tidyr)
+
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# 
+# BiocManager::install("TCGAbiolinks")
+
+# BiocManager::install("BioinformaticsFMRP/TCGAbiolinksGUI.data")
+# BiocManager::install("ExperimentHub")
+# 
+# BiocManager::install("BioinformaticsFMRP/TCGAbiolinks")
+
+source("function2.R") # myfunc.R 의 명령어 실행
+
+use_python("C:\\Users\\249\\AppData\\Local\\Programs\\Python\\Python39\\python.exe")
+
+# cancer_types<-c("BRCA","HNSC","KIRC","LUAD","THCA","LUSC"
+#                 ,"SKCM","COAD","STAD","BLCA","LIHC","CESC","KIRP","ESCA"
+#                 ,"PAAD","READ","TGCT","MESO","ACC","KICH"
+#                 ,"CHOL","PRAD") #THYM,GBM, no-tnm: UCEC,LGG,OV,SARC,LAML,PCPG,UCS,DLBC no-meta: UVM
+cancer_types<-c("BRCA","COAD","HNSC","LUAD","LUSC","STAD","THCA")
+# cancer_types<-c("HNSC")#THCA
+classes<-c("meta","nonmeta")
+scc_filter<-0.4
+# cpm_filter<-1
+
+memory.size(max = TRUE)    # OS에서 얻은 최대 메모리 크기 = OS로부터 R이 사용 가능한 메모리
+memory.size(max = FALSE)   # 현재 사용중인 메모리 크기
+memory.limit(size = 56000)    # 컴퓨터의 최대 메모리 한계치 
+
+```
+
+```{r, include=FALSE}
+#create directory
+setwd(setdir)
+dir.create("ensembl")
+dir.create("plots")
+dir.create("target")
+dir.create("tcga_data")
+dir.create("tmp")
+setwd(str_c(setdir,"\\tcga_data"))
+for ( i in cancer_types ){
+  dir.create(i)
+}
+```
+
+```{r, include=FALSE}
+#download TCGA data
+for (i in 1:length(cancer_types)){
+  # i<-1
+  download_TCGA(cancer_types[i],str_c(setdir,"\\tcga_data\\",cancer_types[i])) 
+} #you need to manipulate ACC , PRAD clinical file : ajcc_clinical_m->ajcc_pathologic_m
+```
+
+```{r,include=FALSE}
+#preprocess clinical files
+for (i in cancer_types){
+  # i<-1
+  pre_clinic(str_c(setdir,'\\tcga_data\\',i,'\\TCGA-',i,'-clinical.csv')) 
+}
+```
+
+```{r, include=FALSE}
+#refining data through lab db
+# pb <- progress_bar$new(total = length(cancer_types))
+# for (i in cancer_types){
+#     db <- dbConnect(
+#         MySQL(),
+#         user = 'bclab',
+#         password = 'bclab',
+#         host = '165.246.44.37',
+#         port = 3307
+#     )
+#     dbGetQuery(db, 'set character set "utf8"')
+#     type <- i
+#     q <- paste("desc tcga_rnaseq_counts.t_",tolower(type),"_infor",sep="")
+#     dbGetQuery(db, q)
+# 
+#     # raw rnaseq count
+#     q <- paste("select * from tcga_rnaseq_counts.t_",tolower(type),"_raw",sep="")
+#     count <- dbGetQuery(db, q)
+#     count_wide <- dcast(count, gene_id~sample_id1)
+# 
+#     # select whole infor table
+#     q <- paste("select * from tcga_rnaseq_counts.t_",tolower(type),"_infor",sep="")
+#     infor_total <- dbGetQuery(db, q)
+# 
+#     #q <- paste("select sample_id1 from tcga_rnaseq_counts.t_",tolower(type),"_infor ",
+#     #           "where is_highest_priority='y' and is_ffpe='n' and has_time='y' and has_mirnaseq='y' and is_replicate='n'",sep="")
+#     q <- paste("select sample_id1 from tcga_rnaseq_counts.t_",tolower(type),"_infor ",
+#               "where is_highest_priority='y' and is_ffpe='n' and has_mirnaseq='y' and is_replicate='n'",sep="")
+#     res <- dbGetQuery(db, q)
+# 
+#     # final data
+#     data <- count_wide[,c("gene_id", res$sample_id1)]
+#     # head(data)
+#     setwd(str_c(setdir,"\\tcga_data\\",i))
+#     write.csv(data,str_c("TCGA-",i,"-Counts.csv"),row.names = F)
+# 
+#     dbDisconnect(db)
+# 
+#     rm(count,count_wide,data,db,infor_total,res)
+#     pb$tick()
+# }
+# rm(q)
+```
+
+```{python, include=FALSE}
+#sort tcga data into normal, tumor samples
+import csv
+import re
+from itertools import product
+import time
+cancer_types_py=r.cancer_types
+setdir_py=r.setdir
+#miRNA preproccessing
+for cancer_type_py in cancer_types_py:
+    f = open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\TCGA-',cancer_type_py,'-miRNA.csv']), 'r', encoding='utf-8') 
+    rdr = list(csv.reader(f))
+    rdrt=list( zip(*rdr))
+    with open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\miRNAMatrix1.csv']), 'w', newline='') as f: 
+        writer = csv.writer(f)
+        writer.writerow(rdrt[0])
+        for ele in rdrt[1:]:
+            if ele[0][13]=='1':
+                writer.writerow(ele)
+        for ele in rdrt[1:]:
+            if ele[0][13]=='0':
+                writer.writerow(ele)
+    f.close()
+    f = open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\miRNAMatrix1.csv']), 'r', encoding='utf-8')
+    rdr = list(csv.reader(f))
+    rdrt=list( zip(*rdr))
+    with open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\miRNAMatrix2.csv']), 'w', newline='') as f:
+        writer = csv.writer(f)
+        for ele in rdrt:
+            writer.writerow(ele)
+    f.close()
+    time.sleep(1)
+
+#gene preproccessing
+for cancer_type_py in cancer_types_py:    
+    f = open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\TCGA-',cancer_type_py,'-Counts.csv']), 'r', encoding='utf-8')
+    rdr = csv.reader(f)
+    rdrt=list( zip(*rdr))
+    with open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\mRNAMatrix1.csv']), 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(rdrt[0])
+        for ele in rdrt[1:]:
+            if ele[0][13]=='1':
+                writer.writerow(ele)
+        for ele in rdrt[1:]:
+            if ele[0][13]=='0':
+                writer.writerow(ele)
+    f.close()
+    f = open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\mRNAMatrix1.csv']), 'r', encoding='utf-8')
+    rdr = list(csv.reader(f))
+    rdrt=list( zip(*rdr))
+    with open(''.join([setdir_py,'\\tcga_data\\',cancer_type_py,'\\mRNAMatrix2.csv']), 'w', newline='') as f:
+        writer = csv.writer(f)
+        for ele in rdrt:
+            writer.writerow(ele)
+    f.close()
+    time.sleep(1)
+quit()
+```
+
+```{r, include=FALSE}
+#pick common samples (existing both in gene_count and miRNA_seq)
+pb <- progress_bar$new(total = length(cancer_types))
+for (i in cancer_types){
+  file.remove(str_c(setdir,'\\tcga_data\\',i,'\\miRNAMatrix1.csv'))
+  file.remove(str_c(setdir,'\\tcga_data\\',i,'\\mRNAMatrix1.csv'))
+  
+  manipul_mat(str_c(setdir,'\\tcga_data\\',i,'\\miRNAMatrix2.csv'),sep=',',cont='id',1,1)
+  manipul_mat(str_c(setdir,'\\tcga_data\\',i,'\\mRNAMatrix2.csv'),sep=',',cont='id',1,1)
+  
+  pickcom(str_c(setdir,'\\tcga_data\\',i), op=F)
+  pb$tick()
+}
+```
+
+```{r,include=FALSE}
+#pick solid tissue samples
+for (i in cancer_types){
+  pick_solid(str_c(setdir,"\\tcga_data\\",i,"\\mRNAMatrix2.csv"))
+}
+```
+
+```{r,include=FALSE}
+#tmm normalization & filtering low expressed genes
+pb <- progress_bar$new(total = length(cancer_types))
+for (i in cancer_types){
+  normalized<-tmm(str_c(setdir,'\\tcga_data\\',i,'\\mRNAMatrix2.csv'), op="do")
+  write.csv(normalized,str_c(setdir,'\\tcga_data\\',i,'\\normalized_g.csv'))
+  round_csv(str_c(setdir,'\\tcga_data\\',i,'\\normalized_g.csv'),8)
+}
+rm(normalized)
+```
+
+```{r,include=FALSE}
+en<-read.csv(str_c(setdir,"\\ensembl\\annotation.csv"),header=T,check.names=F)
+for (i in cancer_types){
+  dt<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\normalized_g.csv"),row.names=1,check.names=F)
+  dt<-dt[row.names(dt)%in%en[,1],]
+  
+  vec<-row.names(dt)
+  id_tab<-geneid_converter(vec,setdir = setdir)
+  row.names(dt)<-id_tab[,1]
+  RNA_id<-id_tab[str_detect(id_tab[,2],'protein_coding') | str_detect(id_tab[,2],'lncRNA') | str_detect(id_tab[,2],'pseudogene'),]
+  miRNA_id<-id_tab[str_detect(id_tab[,2],'miRNA'),]
+  RNA<-dt[row.names(dt)%in%RNA_id[,1],]
+  miRNA<-dt[row.names(dt)%in%miRNA_id[,1],]
+  
+  fwrite(RNA,str_c(setdir,"\\tcga_data\\",i,"\\normalized_rna.csv"),sep = ',',row.names = T,quote = F)
+  fwrite(miRNA,str_c(setdir,"\\tcga_data\\",i,"\\normalized_mi.csv"),sep = ',',row.names = T,quote = F)
+}
+rm(en,vec,id_tab,RNA_id,miRNA_id,RNA,miRNA)
+```
+
+```{r,include=FALSE}
+#separate normal and tumor samples
+for (i in cancer_types){
+  dt<-separate_normal(str_c(setdir,"\\tcga_data\\",i,"\\normalized_rna.csv"))
+  fwrite(dt,str_c(setdir,"\\tcga_data\\",i,"\\normal_normalized_rna.csv"),sep = ',',row.names = T,quote = F)
+  remove_normal(str_c(setdir,"\\tcga_data\\",i,"\\normalized_rna.csv"))
+  dt<-separate_normal(str_c(setdir,"\\tcga_data\\",i,"\\normalized_mi.csv"))
+  fwrite(dt,str_c(setdir,"\\tcga_data\\",i,"\\normal_normalized_mi.csv"),sep = ',',row.names = T,quote = F)
+  remove_normal(str_c(setdir,"\\tcga_data\\",i,"\\normalized_mi.csv"))
+}
+```
+
+```{r,include=FALSE}
+#select samples which are also included in clinical file
+for (i in cancer_types){
+  # i<-'LUAD'
+  colname_slice(str_c(setdir,'\\tcga_data\\',i,'\\normalized_rna.csv'),1,12) #cutting colnames
+  colname_slice(str_c(setdir,'\\tcga_data\\',i,'\\normalized_mi.csv'),1,12)
+}
+pb <- progress_bar$new(total = length(cancer_types))
+for (i in cancer_types){
+  # i<-'HNSC'
+  df<-read.csv(str_c(setdir,'\\tcga_data\\',i,'\\normalized_rna.csv'),row.names = 1, check.names = F) #intersect with count_clinical
+  df<-df[,!duplicated(colnames(df))]
+  clinic<-read.csv(str_c(setdir,'\\tcga_data\\',i,'\\TCGA-',i,'-clinical.csv'),row.names = 1, check.names = F)
+  inter<-intersect(colnames(df),clinic[,1])
+  df<-df[,colnames(df)%in%inter]
+  write.csv(df,str_c(setdir,'\\tcga_data\\',i,'\\normalized_rna.csv'),quote = F)
+  
+  df<-read.csv(str_c(setdir,'\\tcga_data\\',i,'\\normalized_mi.csv'),row.names = 1, check.names = F) #intersect with miRNA_clinical
+  df<-df[,!duplicated(colnames(df))]
+  inter<-intersect(colnames(df),clinic[,1])
+  df<-df[,colnames(df)%in%inter]
+  write.csv(df,str_c(setdir,'\\tcga_data\\',i,'\\normalized_mi.csv'),quote = F)
+  
+  clinic<-clinic[clinic[,1]%in%inter,]
+  write.csv(clinic,str_c(setdir,'\\tcga_data\\',i,'\\TCGA-',i,'-clinical.csv'),quote = F)
+  pb$tick()
+}
+rm(df,clinic,inter,dt)
+```
+
+```{r,include=FALSE}
+#separate non-meta and meta
+for (i in cancer_types){
+  lymp_meta_separator(dir = str_c(setdir,'\\tcga_data\\',i,'\\normalized_rna.csv') #counts
+                      ,clinic_dir = str_c(setdir,'\\tcga_data\\',i,'\\TCGA-',i,'-clinical.csv')
+                      ,setwd = str_c(setdir,'\\tcga_data\\',i), op="men")
+  lymp_meta_separator(dir = str_c(setdir,'\\tcga_data\\',i,'\\normalized_mi.csv') #miRNAs
+                      ,clinic_dir = str_c(setdir,'\\tcga_data\\',i,'\\TCGA-',i,'-clinical.csv')
+                      ,setwd = str_c(setdir,'\\tcga_data\\',i), op="men")
+}
+for (i in cancer_types){
+  for (j in classes){
+    colname_add(str_c(setdir,'\\tcga_data\\',i,'\\',j,'_normalized_rna.csv'),'-01')
+    colname_add(str_c(setdir,'\\tcga_data\\',i,'\\',j,'_normalized_mi.csv'),'-01')
+  }
+}
+```
+###############################ceRNA#################################
+```{r,include=FALSE}
+#calculate scc for miRNA-RNA pair and filtering
+pb <- progress_bar$new(total = length(cancer_types))
+for (i in cancer_types){
+  for (j in classes){
+    mi<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\",j,"_normalized_mi.csv"),row.names = 1,check.names = F)
+    g<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\",j,"_normalized_rna.csv"),row.names = 1, check.names = F)
+    id<-rownames(mi)
+    target<-rownames(g)
+    pair<-tidyr::crossing(id, target)
+    pair<-spearman_ceRNA(pair,mi,g,scc_filter)
+    mi<-mi[rownames(mi)%in%unique(pair[,1]),]
+    fwrite(mi,str_c(setdir,"\\tcga_data\\",i,"\\",j,"_ceRNA_mi.csv"),sep = ',',row.names = T,quote = F)
+    g<-g[rownames(g)%in%unique(pair[,2]),]
+    fwrite(g,str_c(setdir,"\\tcga_data\\",i,"\\",j,"_ceRNA_rna.csv"),sep = ',',row.names = T,quote = F)
+    write.csv(pair,str_c(setdir,"\\tcga_data\\",i,"\\",j,"_ceRNA_pair.csv"),row.names=F,quote=F)
+  }
+  pb$tick()
+}
+rm(mi,g,pair,id,target)
+```
+
+```{r,include=FALSE}
+#generate gcn_input_net
+for (i in cancer_types){
+  meta<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\meta_ceRNA_pair.csv"), check.names = F)[,1:2]
+  nonmeta<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\nonmeta_ceRNA_pair.csv"), check.names = F)[,1:2]
+  admat<-unique(rbind(meta,nonmeta))
+  inter<-inner_join(meta, nonmeta)
+  admat<-dplyr::setdiff(admat,inter)
+  write.csv(admat,str_c(setdir,"\\tcga_data\\",i,"\\admat.csv"),row.names = F,quote = F)
+  cat(str_c("intersect: ",nrow(inter)))
+  # write.csv(inter,str_c(setdir,"\\tcga_data\\",i,"\\cyto_inter.csv"),row.names = F,quote = F)
+  # inter_type<-cyto_type(unique(c(inter[,1],inter[,2])),setdir)
+  # write.csv(inter_type,str_c(setdir,"\\tcga_data\\",i,"\\cyto_inter_type.csv"),quote=F,row.names=F)
+}
+rm(meta,nonmeta,admat,inter)
+```
+
+```{r,include=FALSE}
+#generate label
+for (i in cancer_types){
+  #generate gcn_label file
+  meta<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\meta_ceRNA_mi.csv"),row.names = 1,check.names = F)
+  m_label<-cbind(colnames(meta),rep(1,ncol(meta)))
+  nonmeta<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\nonmeta_ceRNA_mi.csv"),row.names = 1,check.names = F)
+  nm_label<-cbind(colnames(nonmeta),rep(0,ncol(nonmeta)))
+  gctm_label<-rbind(m_label,nm_label)
+  colnames(gctm_label)<-c("sample_id","labels")
+  write.csv(gctm_label,str_c(setdir,"\\tcga_data\\",i,"\\gctm_label.csv"),row.names = F,quote = F)
+}
+rm(meta,nonmeta,m_label,nm_label,gctm_label)
+```
+############################delta PCC###############################
+```{r, include=FALSE}
+for (i in cancer_types){
+  # i<-'BRCA'
+  
+  admat<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\admat.csv"),check.names=F)
+  
+  meta_g<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\meta_normalized_rna.csv"),row.names = 1, check.names = F)
+  nonmeta_g<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\nonmeta_normalized_rna.csv"),row.names = 1, check.names = F)
+
+  meta_mi<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\meta_normalized_mi.csv"),row.names = 1, check.names = F)
+  nonmeta_mi<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\nonmeta_normalized_mi.csv"),row.names = 1, check.names = F)
+  
+  normal_g<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\normal_normalized_rna.csv"),row.names = 1, check.names = F)
+  normal_mi<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\normal_normalized_mi.csv"),row.names = 1, check.names = F)
+  
+  meta_delta<-delta_pcc_ceRNA(admat,normal_g,normal_mi,meta_g,meta_mi)
+  nonmeta_delta<-delta_pcc_ceRNA(admat,normal_g,normal_mi,nonmeta_g,nonmeta_mi)
+  
+  wilcox<-delta_wilcox_test(meta_delta,nonmeta_delta,0.01)
+  write.csv(wilcox,str_c(setdir,"\\tcga_data\\",i,"\\cyto_wilcox.csv"),quote=F,row.names=F)
+  # wilcox_type<-cyto_type(unique(c(wilcox[,1],wilcox[,2])),setdir)
+  # write.csv(wilcox_type,str_c(setdir,"\\tcga_data\\",i,"\\cyto_wilcox_type.csv"),quote=F,row.names=F)
+  
+  row.names(wilcox)<-str_c(wilcox[,1],"_",wilcox[,2])
+  meta_delta<-na.omit(meta_delta)
+  row.names(meta_delta)<-str_c(meta_delta[,1],"_",meta_delta[,2])
+  nonmeta_delta<-na.omit(nonmeta_delta)
+  row.names(nonmeta_delta)<-str_c(nonmeta_delta[,1],"_",nonmeta_delta[,2])
+  
+  meta_delta<-meta_delta[row.names(meta_delta)%in%row.names(wilcox),]
+  nonmeta_delta<-nonmeta_delta[row.names(nonmeta_delta)%in%row.names(wilcox),]
+  nonmeta_delta<-nonmeta_delta[,3:ncol(nonmeta_delta)]
+  admat_final<-merge(meta_delta,nonmeta_delta,by="row.names")
+  admat_final<-admat_final[,-1]
+  
+  write.csv(admat_final,str_c(setdir,"\\tcga_data\\",i,"\\admat_final.csv"),quote=F,row.names=F)
+  
+#   dir.create(str_c(setdir,"\\tcga_data\\",i,"\\admats"))
+#   
+#   for (j in 3:ncol(admat_final)){
+#     tmp<-cbind(admat_final[,1:2],admat_final[,j])
+#     colnames(tmp)<-c("source","target","weight")
+#     write.csv(tmp,str_c(setdir,"\\tcga_data\\",i,"\\admats\\",colnames(admat_final)[j],".csv"),quote=F,row.names=F)
+#   }
+#   
+#   gctm<-read.csv(str_c(setdir,"\\tcga_data\\",i,"\\gctm.csv"),row.names=1,check.names=F)
+#   gctm<-gctm[row.names(gctm)%in%unique(c(admat_final[,1],admat_final[,2])),]
+#   write.csv(gctm,str_c(setdir,"\\tcga_data\\",i,"\\gctm.csv"),quote=F)
+}
+```
