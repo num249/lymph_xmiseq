@@ -6,8 +6,6 @@ output: github_document
 ---
 
 ```{r setup, include=FALSE}
-#this is second joke
-#this is just joke
 # install.packages("installr")
 # library(maftools)
 # install.R()
